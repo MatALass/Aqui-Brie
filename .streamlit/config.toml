@@ -1,0 +1,26 @@
+# Thème « Strates & eau » : couleurs du logo AQUI'Brie, fond calcaire, police Nunito.
+
+[server]
+enableStaticServing = true
+
+[theme]
+base = "light"
+primaryColor = "#00969E"
+backgroundColor = "#FBFAF5"
+secondaryBackgroundColor = "#EFEBDF"
+textColor = "#0B3B40"
+font = "Nunito, 'Segoe UI', sans-serif"
+headingFont = "Nunito, 'Segoe UI', sans-serif"
+baseRadius = "0.6rem"
+borderColor = "#E6E1D3"
+
+[[theme.fontFaces]]
+family = "Nunito"
+url = "app/static/Nunito.ttf"
+weight = "200 1000"
+
+[theme.sidebar]
+backgroundColor = "#0B3B40"
+secondaryBackgroundColor = "#14555B"
+textColor = "#F2F7F5"
+primaryColor = "#BBCD0E"

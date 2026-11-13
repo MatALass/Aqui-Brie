@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "aquibrie-viz"
+version = "0.5.0"
+description = "Générateur d'infographies AQUI'Brie (données publiques Hub'Eau)"
+requires-python = ">=3.11"
+dependencies = [
+    "streamlit>=1.40",
+    "plotly>=6.1.1",
+    "kaleido>=1.0",
+    "pandas>=2.0",
+    "pyarrow>=14",
+    "numpy>=1.26",
+    "requests>=2.31",
+    "python-pptx>=1.0",
+    "docxtpl>=0.18",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+aquibrie-rapport = "aquibrie_viz.rapport:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+filterwarnings = ["ignore:The kopts argument is ignored:UserWarning"]

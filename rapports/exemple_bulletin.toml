@@ -1,0 +1,55 @@
+# Rapport d'infographies AQUI'Brie : relancer ce fichier régénère toutes les figures.
+#
+#   python -m aquibrie_viz.rapport rapports/exemple_bulletin.toml --sortie sorties
+#
+# periode_ans : nombre d'années jusqu'à aujourd'hui (0 = tout l'historique).
+# annee : "derniere" pour l'année la plus récente, ou une année précise.
+# station : code BSS d'un piézomètre ; bss_qualite : identifiant d'une station qualité.
+# Les stations ci-dessous sont des exemples : remplacez-les par celles de vos rapports.
+
+titre = "Bulletin de situation de la nappe du Champigny"
+perimetre = "masse_eau"
+
+[[figure]]
+id = "fiche"
+modele = "fiche_synthese"
+station = "02603X0009/S1"
+
+[[figure]]
+id = "carte_situation"
+modele = "carte_situation"
+
+[[figure]]
+id = "classement"
+modele = "situation_stations"
+
+[[figure]]
+id = "niveau_beauchery"
+modele = "chronique_seuils"
+station = "02603X0009/S1"
+periode_ans = 10
+
+[[figure]]
+id = "annee_beauchery"
+modele = "annee_vs_historique"
+station = "02603X0009/S1"
+annee = "derniere"
+periode_ans = 20
+
+[[figure]]
+id = "recharge_beauchery"
+modele = "recharge_annuelle"
+station = "02603X0009/S1"
+periode_ans = 20
+
+[[figure]]
+id = "nitrates_carte"
+modele = "carte_qualite"
+substance = "Nitrates"
+periode_ans = 5
+
+[[figure]]
+id = "nitrates_evolution"
+modele = "qualite_annuelle"
+substance = "Nitrates"
+periode_ans = 10

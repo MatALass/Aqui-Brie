@@ -1,0 +1,43 @@
+# --- Environnement virtuel ---
+.venv/
+venv/
+env/
+
+# --- Python : bytecode et build ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.eggs/
+
+# --- Tests et qualité ---
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# --- Streamlit : secrets uniquement (config.toml reste versionné) ---
+.streamlit/secrets.toml
+
+# --- Variables d'environnement ---
+.env
+.env.*
+!.env.example
+
+# --- Sorties générées par l'app (adapter le chemin si besoin) ---
+outputs/
+exports/
+*.tmp
+
+# --- Fichiers temporaires Office (Word ouvert) ---
+~$*.docx
+~$*.xlsx
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
