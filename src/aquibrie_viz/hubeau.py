@@ -64,7 +64,7 @@ def _requete(url: str, query: dict | None, endpoint: str) -> dict:
     ne signifie pas que les données sont absentes, il suffit souvent de réessayer.
     """
     derniere_erreur = ""
-    for tentative, attente in enumerate(ATTENTES_RETRY_S + [None]):
+    for attente in [*ATTENTES_RETRY_S, None]:
         try:
             with _limiteur:
                 response = requests.get(url, params=query, timeout=TIMEOUT_S)
@@ -79,7 +79,7 @@ def _requete(url: str, query: dict | None, endpoint: str) -> dict:
         if attente is None:
             break
         time.sleep(attente)
-    raise HubEauError(f"API Hub'Eau injoignable sur {endpoint} après {tentative + 1} essais "
+    raise HubEauError(f"API Hub'Eau injoignable sur {endpoint} après {len(ATTENTES_RETRY_S) + 1} essais "
                       f"({derniere_erreur}).")
 
 
@@ -213,7 +213,7 @@ def chroniques_stations(codes_bss: list[str], debut: date, fin: date,
             return None
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        resultats = dict(zip(codes_bss, pool.map(charger, codes_bss)))
+        resultats = dict(zip(codes_bss, pool.map(charger, codes_bss), strict=False))
     echecs = [c for c, df in resultats.items() if df is None]
     return {c: df for c, df in resultats.items() if df is not None}, echecs
 

@@ -21,7 +21,7 @@ class FauxFournisseur:
         communes = ["Beauchery-Saint-Martin", "Melun", "Nangis", "Provins", "Coulommiers", "Fontenay"]
         return pd.DataFrame({
             "code_bss": CODES, "bss_id": [f"BSS{i}" for i in range(6)],
-            "nom": [f"{c} ({code})" for c, code in zip(communes, CODES)], "commune": communes,
+            "nom": [f"{c} ({code})" for c, code in zip(communes, CODES, strict=False)], "commune": communes,
             "lon": np.linspace(2.6, 3.4, 6), "lat": np.linspace(48.5, 48.8, 6),
             "date_fin_mesure": pd.Timestamp("2026-10-31"),
         })

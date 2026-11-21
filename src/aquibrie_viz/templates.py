@@ -14,8 +14,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 from . import indicators as ind
-from .theme import (COLORS, QUALITE, SITUATION, STATUS, TEMPLATE_NAME, apply_signature,
-                    title_with_subtitle)
+from .theme import COLORS, QUALITE, REMPLISSAGE, SITUATION, STATUS, TEMPLATE_NAME, apply_signature, title_with_subtitle
 
 SOURCE_HUBEAU = "Hub'Eau · BRGM, banque ADES"
 
@@ -310,7 +309,7 @@ def situation_stations(sit: pd.DataFrame, source: str = SOURCE_HUBEAU) -> go.Fig
     s = sit.sort_values("percentile", ascending=True)
     fig = go.Figure()
     bornes = [0] + [b for b, _ in ind.CLASSES_SITUATION[:-1]] + [100]
-    for (x0, x1), classe in zip(zip(bornes[:-1], bornes[1:]), ind.ORDRE_CLASSES):
+    for (x0, x1), classe in zip(zip(bornes[:-1], bornes[1:], strict=False), ind.ORDRE_CLASSES, strict=False):
         fig.add_vrect(x0=x0, x1=x1, fillcolor=SITUATION[classe], opacity=0.16, line_width=0, layer="below")
         fig.add_annotation(x=(x0 + x1) / 2, y=1.0, yref="paper", yanchor="bottom", showarrow=False,
                            text=classe, font=dict(size=13, color=COLORS["muted"]))
@@ -421,7 +420,8 @@ def carte_qualite(synth: pd.DataFrame, parametre: str, unite: str, source: str =
             fig, groupe, QUALITE[categorie], categorie, taille,
             ("<b>%{text}</b><br>%{customdata[0]} analyses · max %{customdata[1]} " + unite
              + "<br>%{customdata[2]} dépassement(s)<extra></extra>"),
-            customdata=np.stack([groupe["n"], groupe["maximum"].round(3).astype(object).where(groupe["maximum"].notna(), "–"),
+            customdata=np.stack([groupe["n"],
+                                 groupe["maximum"].round(3).astype(object).where(groupe["maximum"].notna(), "–"),
                                  groupe["n_depassements"]], axis=1) if not groupe.empty else None,
         )
     n_dep = int((s["n_depassements"] > 0).sum())
@@ -513,10 +513,128 @@ def qualite_annuelle(annuel: pd.DataFrame, parametre: str, source: str = SOURCE_
     # Le nombre d'analyses varie d'une année à l'autre : on l'écrit sous chaque année
     # pour éviter de lire une fausse tendance.
     etiquettes = [f"<b>{int(a)}</b><br><span style='font-size:12px;color:{COLORS['muted']}'>"
-                  f"{int(n)} analyses</span>" for a, n in zip(annuel["annee"], annuel["n_analyses"])]
+                  f"{int(n)} analyses</span>" for a, n in zip(annuel["annee"], annuel["n_analyses"], strict=False)]
     fig.update_layout(
         template=TEMPLATE_NAME, title=title_with_subtitle(titre, sous_titre), barmode="group",
         bargap=0.3, yaxis=dict(title="Part des analyses (%)", rangemode="tozero", ticksuffix=" %"),
         xaxis=dict(tickvals=annuel["annee"], ticktext=etiquettes), margin=dict(b=120),
     )
+    return apply_signature(fig, source)
+
+
+# ---------------------------------------------------------------------------
+# 7. Info Piézo : taux de remplissage et projection par analogie
+# ---------------------------------------------------------------------------
+
+def _titre_remplissage(synth: pd.DataFrame) -> str:
+    mesures = synth.dropna(subset=["taux"])
+    haut = int((mesures["taux"] >= 50).sum())
+    return f"{haut} piézomètre{'s' if haut > 1 else ''} sur {len(mesures)} au-dessus de 50 % de remplissage"
+
+
+def jauges_remplissage(synth: pd.DataFrame, jour: pd.Timestamp, source: str = SOURCE_HUBEAU) -> go.Figure:
+    """Une jauge de 0 à 100 par piézomètre, comme dans l'Info Piézo d'AQUI'Brie."""
+    from .bulletin import ANNEE_REFERENCE, ORDRE_TRANCHES, TRANCHES_REMPLISSAGE
+
+    s = synth.dropna(subset=["taux"]).sort_values("taux", ascending=True)
+    if s.empty:
+        raise ValueError("Aucun piézomètre n'a de mesure à cette date.")
+    fig = go.Figure()
+    bornes = [0] + [b for b, _ in TRANCHES_REMPLISSAGE[:-1]] + [100]
+    for (x0, x1), nom in zip(zip(bornes[:-1], bornes[1:], strict=False), ORDRE_TRANCHES, strict=False):
+        fig.add_vrect(x0=x0, x1=x1, fillcolor=REMPLISSAGE[nom], opacity=0.12, line_width=0, layer="below")
+        fig.add_annotation(x=(x0 + x1) / 2, y=1.0, yref="paper", yanchor="bottom", showarrow=False,
+                           text=nom, font=dict(size=13, color=COLORS["muted"]))
+    fig.add_trace(go.Bar(
+        x=s["taux"], y=s["commune"], orientation="h",
+        marker=dict(color=[REMPLISSAGE[t] for t in s["tranche"]], line=dict(width=0)),
+        text=[f"{fr_num(t, 0)} %" for t in s["taux"]], textposition="outside", cliponaxis=False,
+        textfont=dict(size=13, color=COLORS["abyss"]),
+        customdata=np.stack([s["niveau"], s["date_mesure"].dt.strftime("%d/%m/%Y"), s["code_bss"]], axis=1),
+        hovertemplate=("<b>%{y}</b> (%{customdata[2]})<br>remplissage %{x:.0f} %<br>"
+                       "niveau %{customdata[0]:.2f} m NGF, mesure du %{customdata[1]}<extra></extra>"),
+    ))
+    fig.add_vline(x=50, line=dict(color=COLORS["abyss"], width=1.4, dash="dot"))
+    manquants = int(synth["taux"].isna().sum())
+    note = f" · {manquants} sans mesure récente" if manquants else ""
+    sous_titre = (f"Au {fr_date(jour)} · position du niveau entre le minimum (0) et le maximum (100) "
+                  f"mesurés depuis {ANNEE_REFERENCE}{note}")
+    fig.update_layout(
+        template=TEMPLATE_NAME, title=title_with_subtitle(_titre_remplissage(synth), sous_titre),
+        showlegend=False, height=max(560, 28 * len(s) + 260), margin=dict(l=200, r=80), bargap=0.25,
+        xaxis=dict(range=[0, 108], tickvals=[0, 25, 50, 75, 100], ticksuffix=" %", showgrid=False),
+        yaxis=dict(type="category", tickfont=dict(size=14)),
+    )
+    return apply_signature(fig, source)
+
+
+def carte_remplissage(synth: pd.DataFrame, jour: pd.Timestamp, source: str = SOURCE_HUBEAU) -> go.Figure:
+    """Carte des piézomètres de l'Info Piézo, colorés par tranche de remplissage."""
+    from .bulletin import ORDRE_TRANCHES
+
+    base = synth.dropna(subset=["lon", "lat"]).assign(libelle=lambda d: d["commune"])
+    fig = go.Figure()
+    _points_cartes(fig, base[base["taux"].isna()], COLORS["muted"], "Sans mesure récente", 12,
+                   "<b>%{text}</b><br>pas de mesure récente<extra></extra>")
+    for nom in ORDRE_TRANCHES:
+        groupe = base[base["tranche"] == nom]
+        _points_cartes(fig, groupe, REMPLISSAGE[nom], nom, 18,
+                       "<b>%{text}</b><br>" + nom + " · %{customdata:.0f} %<extra></extra>",
+                       customdata=groupe["taux"])
+    return _mise_en_page_carte(fig, _titre_remplissage(synth), f"Taux de remplissage au {fr_date(jour)}",
+                               base["lon"], base["lat"], source)
+
+
+def projection_analogues(proj, station: str, nom_seuil: str = "Vigilance", observe: pd.DataFrame | None = None,
+                         annee_mise_en_avant: int | None = None, source: str = SOURCE_HUBEAU) -> go.Figure:
+    """Éventail des trajectoires possibles : chaque année passée rejouée depuis le niveau du jour.
+
+    observe : mesures réelles après la date de départ, si elles existent. Elles montrent si la
+    projection était juste (c'est le cas quand on refait un bulletin déjà publié).
+    """
+    traj = proj.trajectoires
+    annee_mise_en_avant = annee_mise_en_avant or proj.depart.year - 1
+    n_sous = int(proj.franchissements.notna().sum())
+    fin = traj.index[-1]
+    if n_sous:
+        titre = (f"{n_sous} année{'s' if n_sous > 1 else ''} sur {proj.nb_annees} passerai"
+                 f"{'en' if n_sous > 1 else ''}t sous le seuil {SEUIL_ARTICLE[nom_seuil]} avant le {fr_date(fin)}")
+    else:
+        titre = (f"Aucune des {proj.nb_annees} années passées ne ferait passer la nappe "
+                 f"sous le seuil {SEUIL_ARTICLE[nom_seuil]}")
+    sous_titre = (f"{station} · niveau du {fr_date(proj.depart)} ({fr_num(proj.niveau_depart)} m), "
+                  f"puis l'évolution de chaque année depuis {traj.columns.min()} à la même date")
+    fig = go.Figure()
+    for annee, valeurs in traj.items():
+        fig.add_trace(go.Scatter(x=traj.index, y=valeurs, mode="lines", showlegend=False,
+                                 line=dict(color="rgba(0,150,158,0.18)", width=1),
+                                 hovertemplate=f"comme en {annee} : " + "%{y:.2f} m<extra></extra>"))
+    bas, haut, mediane = proj.quantile(0.1), proj.quantile(0.9), proj.quantile(0.5)
+    fig.add_trace(go.Scatter(x=list(traj.index) + list(traj.index[::-1]), y=list(haut) + list(bas[::-1]),
+                             fill="toself", fillcolor="rgba(0,150,158,0.14)", line=dict(width=0),
+                             name="8 années sur 10", hoverinfo="skip"))
+    fig.add_trace(go.Scatter(x=traj.index, y=mediane, mode="lines", name="Année médiane",
+                             line=dict(color=COLORS["aqui_dark"], width=3),
+                             hovertemplate="année médiane : %{y:.2f} m<extra></extra>"))
+    if annee_mise_en_avant in traj.columns:
+        fig.add_trace(go.Scatter(x=traj.index, y=traj[annee_mise_en_avant], mode="lines",
+                                 name=f"Comme en {annee_mise_en_avant}",
+                                 line=dict(color=COLORS["brie_dark"], width=2.6, dash="dash"),
+                                 hovertemplate=f"comme en {annee_mise_en_avant} : " + "%{y:.2f} m<extra></extra>"))
+    if observe is not None and not observe.empty:
+        vu = observe[(observe["date"] >= proj.depart) & (observe["date"] <= fin)]
+        if not vu.empty:
+            fig.add_trace(go.Scatter(x=vu["date"], y=vu["niveau"], mode="lines", name="Mesuré depuis",
+                                     line=dict(color=COLORS["abyss"], width=3),
+                                     hovertemplate="mesuré : %{x|%d/%m/%Y} · %{y:.2f} m<extra></extra>"))
+    fig.add_hline(y=proj.seuil, line=dict(color=STATUS[nom_seuil], width=1.6, dash="dash"))
+    _etiquette_droite(fig, proj.seuil, f"<b>{nom_seuil}</b> {fr_num(proj.seuil, 1)} m", STATUS[nom_seuil],
+                      encre=COLORS["abyss"] if nom_seuil == "Vigilance" else "white")
+    _accent_point(fig, proj.depart, proj.niveau_depart, f"<b>{fr_num(proj.niveau_depart)} m</b>", xanchor="left")
+    # Cadré sur la bande 8 années sur 10 et le seuil : quelques années très humides écraseraient le reste.
+    y_bas = min(float(bas.min()), proj.seuil, proj.niveau_depart) - 1
+    y_haut = max(float(haut.max()), proj.niveau_depart) + 1
+    fig.update_layout(template=TEMPLATE_NAME, title=title_with_subtitle(titre, sous_titre),
+                      yaxis=dict(title="Altitude de la nappe (m NGF)", range=[y_bas, y_haut]),
+                      legend=dict(orientation="h", y=1.01, x=0.35))
     return apply_signature(fig, source)

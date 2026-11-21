@@ -90,7 +90,7 @@ def test_anomalies_mensuelles(chronique):
 
 def test_synthese_qualite(analyses):
     synth = ind.synthese_stations_qualite(analyses, norme=0.1)
-    cat = dict(zip(synth["bss_id"], synth["categorie"]))
+    cat = dict(zip(synth["bss_id"], synth["categorie"], strict=False))
     assert cat == {"S1": "Dépassement de la norme", "S2": "Détecté, sous la norme", "S3": "Jamais quantifié"}
     annuel = ind.synthese_annuelle_qualite(analyses, norme=0.1)
     assert annuel["n_stations"].eq(3).all()

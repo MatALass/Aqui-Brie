@@ -26,10 +26,11 @@ import plotly.graph_objects as go
 import plotly.io as pio
 import streamlit as st
 
-from aquibrie_viz import donnees, fiche, hubeau, rapport, reference, templates
+from aquibrie_viz import bulletin, donnees, fiche, hubeau, rapport, reference, templates
 from aquibrie_viz import indicators as ind
 from aquibrie_viz.export import FORMATS, ExportError, demarrer_moteur, figure_to_bytes
-from aquibrie_viz.theme import COLORS, QUALITE, SITUATION, STATUS
+from aquibrie_viz.templates import fr_date, fr_num
+from aquibrie_viz.theme import COLORS, QUALITE, REMPLISSAGE, SITUATION, STATUS
 
 st.set_page_config(page_title="AQUI'Brie — infographies", page_icon="💧", layout="wide")
 
@@ -251,7 +252,7 @@ def boutons(fig: go.Figure, nom: str, spec: dict | None, formats: tuple[str, ...
         return
     colonnes = st.columns(len(formats))
     figure_json = fig.to_json()  # seulement quand les exports sont demandés
-    for col, fmt in zip(colonnes, formats):
+    for col, fmt in zip(colonnes, formats, strict=False):
         mime, libelle = FORMATS[fmt]
         try:
             data = exporter(figure_json, fmt)
@@ -709,7 +710,7 @@ def page_rapport() -> None:
         st.info("Le rapport est vide. Ajoutez des figures depuis les autres pages, ou chargez l'exemple.")
         return
     st.session_state.rapport_titre = st.text_input("Titre du rapport", st.session_state.rapport_titre)
-    noms_stations = dict(zip(stations["code_bss"], stations["commune"]))
+    noms_stations = dict(zip(stations["code_bss"], stations["commune"], strict=False))
     st.markdown(f"**{len(figures_rapport)} figure(s), dans l'ordre du rapport**")
     for i, spec in enumerate(list(figures_rapport)):
         l1, l2, l3, l4 = st.columns([12, 1, 1, 1])
@@ -792,7 +793,7 @@ def page_charte() -> None:
 
     def nuancier(couleurs: dict[str, tuple[str, str]], texte_clair: set[str]) -> None:
         cols = st.columns(len(couleurs))
-        for col, (nom, (hexa, role)) in zip(cols, couleurs.items()):
+        for col, (nom, (hexa, role)) in zip(cols, couleurs.items(), strict=False):
             encre = "white" if nom in texte_clair else COLORS["abyss"]
             col.markdown(
                 f"<div class='ab-swatch' style='background:{hexa};color:{encre}'>"
@@ -821,10 +822,159 @@ def page_charte() -> None:
     st.caption("Couleurs du logo mesurées sur le document de l'association. Proposition à valider.")
 
 
+# =============================================================================
+# 0. Info Piézo : le bulletin d'AQUI'Brie recalculé à partir de Hub'Eau
+# =============================================================================
+@st.cache_data(ttl=TTL, show_spinner="Chargement des piézomètres de l'Info Piézo…")
+def charger_reseau_info_piezo() -> tuple[pd.DataFrame, dict[str, pd.DataFrame], list[str]]:
+    toutes = charger_stations(departements, None)
+    reseau = toutes[toutes["code_bss"].isin(reference.RESEAU_INFO_PIEZO)].copy()
+    reseau["commune"] = reseau["code_bss"].map(reference.RESEAU_INFO_PIEZO)
+    chroniques, echecs = donnees.chroniques(list(reseau["code_bss"]), HISTORIQUE_DEBUT)
+    return reseau.reset_index(drop=True), chroniques, echecs
+
+
+def page_info_piezo() -> None:
+    st.markdown(
+        "AQUI'Brie publie tous les deux à trois mois un **Info Piézo** : où en est la nappe du Champigny, "
+        "piézomètre par piézomètre. Cette page le recalcule à partir des données publiques Hub'Eau, "
+        "avec la même jauge de 0 à 100 que le bulletin."
+    )
+    try:
+        reseau, chroniques, echecs = charger_reseau_info_piezo()
+    except hubeau.HubEauError as exc:
+        st.error(f"Hub'Eau ne répond pas et aucune donnée n'est en cache. {exc}")
+        return
+    if reseau.empty:
+        st.warning("Aucun piézomètre du réseau Info Piézo n'a été trouvé dans Hub'Eau.")
+        return
+    if echecs:
+        st.warning(f"Hub'Eau n'a pas répondu pour {len(echecs)} piézomètre(s) : ils apparaissent sans mesure.")
+
+    publie = reference.INFO_PIEZO_65
+    jour_publie = pd.Timestamp(publie["date"])
+    defaut = bulletin.date_situation_commune(chroniques) or jour_publie
+    c1, c2 = st.columns([1, 2], vertical_alignment="bottom")
+    comparer = c2.toggle("Refaire l'Info Piézo n°65 (13 juin 2026) et comparer aux chiffres publiés",
+                         key="ip_comparer")
+    jour = pd.Timestamp(c1.date_input("Situation au", defaut.date(), min_value=date(2004, 1, 1),
+                                      max_value=date.today(), format="DD/MM/YYYY", key="ip_jour",
+                                      disabled=comparer))
+    if comparer:
+        jour = jour_publie
+
+    synth = bulletin.synthese_remplissage(reseau, chroniques, jour)
+    comptes = bulletin.compte_tranches(synth)
+    ouest, est = reference.REFERENCE_OUEST, reference.REFERENCE_EST
+    seuil_est = reference.SEUILS_CONNUS["BEAUCHERY"]["Vigilance"]
+
+    k1, k2, k3, k4 = st.columns(4)
+    mesures = len(synth) - comptes["sans mesure"]
+    kpi(k1, "Au-dessus de 50 %", f"{comptes['au-dessus de 50']} / {mesures}", "remplissage satisfaisant ou mieux",
+        REMPLISSAGE["Satisfaisant"])
+    kpi(k2, "Sous 50 %", f"{comptes['sous 50']} / {mesures}",
+        f"dont {comptes['Très faible']} sous 25 %", REMPLISSAGE["Faible"])
+    niveau_est = bulletin.niveau_a_date(chroniques.get(est, pd.DataFrame(columns=["date", "niveau"])), jour)
+    if niveau_est:
+        ecart = niveau_est[0] - seuil_est
+        kpi(k3, "Champigny est (Beauchery)", f"{'+' if ecart >= 0 else '−'}{fr_num(abs(ecart), 2)} m",
+            f"par rapport au seuil de vigilance ({fr_num(seuil_est, 1)} m NGF)",
+            STATUS["Vigilance"] if ecart < 1 else None)
+    else:
+        kpi(k3, "Champigny est (Beauchery)", "–", "pas de mesure à cette date")
+    debut_periode = jour - pd.DateOffset(months=3)
+    var_ouest = bulletin.variation(chroniques.get(ouest, pd.DataFrame(columns=["date", "niveau"])),
+                                   debut_periode, jour)
+    kpi(k4, "Champigny ouest (Montereau)",
+        "–" if var_ouest is None else f"{'+' if var_ouest >= 0 else '−'}{fr_num(abs(var_ouest), 2)} m",
+        "évolution sur 3 mois")
+    if comptes["sans mesure"]:
+        st.caption(f"{comptes['sans mesure']} piézomètre(s) sans mesure dans les 15 jours avant cette date : "
+                   "le réseau départemental arrive dans Hub'Eau par lots de plusieurs mois.")
+    st.write("")
+
+    onglet = st.segmented_control("Vue", ["Jauges", "Carte", "Projection de l'hiver", "Cycles sur 11 ans"],
+                                  default="Jauges", key="ip_vue", label_visibility="collapsed") or "Jauges"
+    if onglet == "Jauges":
+        fig = figure_ou_message(templates.jauges_remplissage, synth, jour)
+        if fig is not None:
+            afficher(fig, f"info-piezo-jauges-{jour:%Y%m%d}")
+        aide("Chaque barre place le niveau du jour entre le plus bas (0) et le plus haut (100) mesurés depuis "
+             "2003 sur ce piézomètre. Les tranches sont celles de l'Info Piézo : sous 25 très faible, sous 50 "
+             "faible, de 50 à 75 satisfaisant, au-dessus de 75 très satisfaisant.")
+    elif onglet == "Carte":
+        afficher(templates.carte_remplissage(synth, jour), f"info-piezo-carte-{jour:%Y%m%d}")
+    elif onglet == "Projection de l'hiver":
+        b = chroniques.get(est)
+        proj = bulletin.projection_analogues(b, jour, seuil_est) if b is not None else None
+        if proj is None:
+            st.info("Pas assez de données à cette date pour projeter le niveau de Beauchery-Saint-Martin.")
+        else:
+            afficher(templates.projection_analogues(proj, "Beauchery-Saint-Martin (Champigny est)", observe=b),
+                     f"info-piezo-projection-{jour:%Y%m%d}")
+            premiers = proj.franchissements.dropna().sort_values()
+            if not premiers.empty:
+                st.markdown(
+                    f"Si la nappe se comporte comme en **{premiers.index[0]}**, elle passe sous le seuil de "
+                    f"vigilance le **{fr_date(premiers.iloc[0])}**. Comme l'an dernier "
+                    f"({jour.year - 1}) : "
+                    + (f"le **{fr_date(proj.franchissements[jour.year - 1])}**."
+                       if jour.year - 1 in proj.franchissements and pd.notna(proj.franchissements[jour.year - 1])
+                       else "pas de franchissement.")
+                )
+        aide("On part du niveau du jour, puis on applique la baisse (ou la hausse) observée à la même date "
+             "chaque année depuis 1990. Chaque fine ligne est une année passée ; la bande contient 8 années sur "
+             "10. Ce n'est pas une prévision météo : c'est l'éventail de ce que la nappe a déjà fait. Quand la "
+             "date choisie est passée, le trait foncé montre ce qui s'est réellement produit.")
+    else:
+        colonnes = st.columns(2)
+        for col, (code_ref, libelle) in zip(colonnes, [(ouest, "Montereau-sur-le-Jard"),
+                                                       (est, "Beauchery-Saint-Martin")], strict=False):
+            df = chroniques.get(code_ref)
+            if df is None or df.empty:
+                col.info(f"Pas de données pour {libelle}.")
+                continue
+            onze = df[(df["date"] > jour - pd.DateOffset(years=11)) & (df["date"] <= jour)]
+            seuils, officiels = reference.seuils_station(libelle, df)
+            with col:
+                afficher(templates.chronique_seuils(onze, seuils, libelle, seuils_officiels=officiels),
+                         f"info-piezo-cycles-{code_ref}-{jour:%Y%m%d}")
+        st.caption("Seuils de Montereau-sur-le-Jard : indicatifs tant que les valeurs de l'arrêté-cadre "
+                   "n° 2024/DDT/SEPR/191 ne sont pas saisies dans l'outil.")
+
+    if comparer:
+        st.subheader("Contrôle : chiffres recalculés et chiffres publiés")
+        sous_50 = synth[synth["taux"] < 50]["commune"].tolist()
+        retrouves = [c for c in publie["sous_50_communes"] if c in sous_50]
+        b = chroniques.get(est)
+        debut_64 = pd.Timestamp(publie["debut_periode"])
+        baisse_est = -(bulletin.variation(b, debut_64, jour) or 0)
+        baisse_ouest = -(bulletin.variation(chroniques[ouest], debut_64, jour) or 0)
+        lignes = [
+            ("Piézomètres au-dessus de 50 %", str(publie["au_dessus_50"]), str(comptes["au-dessus de 50"])),
+            ("Piézomètres sous 50 %", str(publie["sous_50"]), str(comptes["sous 50"])),
+            ("Communes sous 50 % citées et retrouvées", str(len(publie["sous_50_communes"])), str(len(retrouves))),
+            ("Beauchery : écart au seuil de vigilance", "+4,8 m",
+             f"+{fr_num(niveau_est[0] - seuil_est, 2)} m" if niveau_est else "–"),
+            ("Beauchery : baisse depuis le n°64", "1,3 m", f"{fr_num(baisse_est, 2)} m"),
+            ("Montereau : baisse depuis le n°64", "0,5 m", f"{fr_num(baisse_ouest, 2)} m"),
+        ]
+        st.dataframe(pd.DataFrame(lignes, columns=["Indicateur", "Info Piézo n°65", "Recalculé ici"]),
+                     hide_index=True, width="stretch")
+        manquent = [c for c in publie["sous_50_communes"] if c not in retrouves]
+        st.markdown(
+            f"Communes que le bulletin classe sous 50 % et pas l'outil : **{', '.join(manquent) or 'aucune'}**. "
+            "Les écarts viennent surtout de la liste des 26 piézomètres, que le bulletin ne publie pas "
+            "(l'outil la reconstitue), et de mesures de terrain qui ne sont pas encore dans Hub'Eau. "
+            f"[Lire le bulletin publié]({publie['url']})."
+        )
+
+
 # --- Navigation : seule la page affichée s'exécute -----------------------------
 
 navigation = st.navigation(
-    [st.Page(page_ensemble, title="Vue d'ensemble", url_path="ensemble", default=True),
+    [st.Page(page_info_piezo, title="Info Piézo", url_path="info-piezo", default=True),
+     st.Page(page_ensemble, title="Vue d'ensemble", url_path="ensemble"),
      st.Page(page_station, title="Station", url_path="station"),
      st.Page(page_qualite, title="Qualité de l'eau", url_path="qualite"),
      st.Page(page_fiche, title="Fiche grand public", url_path="fiche"),
