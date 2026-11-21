@@ -1,13 +1,86 @@
-# Démonstrateur — générateur d'infographies AQUI'Brie
+# AQUI'Brie : générateur d'infographies sur la nappe de Champigny
 
-Application Streamlit qui produit des infographies sur la nappe des calcaires de
-Champigny à partir des données publiques de l'API [Hub'Eau](https://hubeau.eaufrance.fr)
-(BRGM, banque ADES). Elle préfigure l'outil final, qui lira le SQL Server d'AQUI'Brie.
+[![CI](https://github.com/MatALass/Aqui-Brie/actions/workflows/ci.yml/badge.svg)](https://github.com/MatALass/Aqui-Brie/actions/workflows/ci.yml)
+
+Projet d'équipe EFREI (ING3, 4 étudiants) pour un vrai commanditaire : **l'association AQUI'Brie**,
+qui suit la nappe des calcaires de Champigny, une réserve qui alimente en eau potable près d'un
+million de Franciliens. Le besoin exprimé en réunion : leurs rapports dépassent 200 pages, et
+leurs figures sont refaites à la main à chaque mise à jour.
+
+L'application Streamlit produit ces figures à partir des données publiques
+[Hub'Eau](https://hubeau.eaufrance.fr) (BRGM, banque ADES), les mêmes que celles qu'AQUI'Brie
+cite dans ses bulletins, et les exporte en PNG, SVG, PDF, PowerPoint ou Word.
+
+![Page Info Piézo de l'application](docs/images/app-info-piezo.webp)
+
+## Le résultat : l'Info Piézo n°65 refait à partir des données publiques
+
+AQUI'Brie publie tous les deux à trois mois un **Info Piézo**, qui situe chaque piézomètre sur
+une jauge de 0 à 100 (le niveau du jour entre le minimum et le maximum mesurés depuis 2003).
+J'ai refait le [n°65](https://www.aquibrie.fr/publications/info-piezo-ndeg65-avril-juin-2026)
+(mesures du 13 juin 2026) avec l'outil, puis comparé chiffre par chiffre :
+
+| Indicateur | Publié | Recalculé |
+| --- | --- | --- |
+| Beauchery-Saint-Martin, écart au seuil de vigilance | +4,8 m | **+4,80 m** |
+| Beauchery-Saint-Martin, baisse depuis le n°64 | 1,3 m | **1,29 m** |
+| Piézomètres au-dessus de 50 % | 16 sur 26 | 15 sur 26 |
+| Communes citées sous 50 % et retrouvées | 10 | 7 |
+| Montereau-sur-le-Jard, baisse depuis le n°64 | 0,5 m | 0,33 m |
+
+Les chiffres des piézomètres de référence tombent juste. Les écarts sur le décompte viennent
+de la liste des 26 piézomètres, que le bulletin ne publie pas : je l'ai reconstituée à partir
+de Hub'Eau (détails dans [Limites connues](#limites-connues)).
+
+**Ce que l'outil ajoute au bulletin : une projection par analogie.** Le n°65 annonçait que
+Beauchery-Saint-Martin pourrait passer sous le seuil de vigilance début décembre. L'outil
+rejoue, à partir du niveau du 13 juin, l'évolution de chacune des 34 années passées depuis
+1990 :
+
+- 8 années sur 34 font passer la nappe sous le seuil de vigilance avant mars 2027 ;
+- « comme en 2025 », le franchissement tombe le 3 décembre 2026, ce qui rejoint le bulletin ;
+- les mesures réelles reçues depuis (trait foncé) suivent la bande basse : au 20 novembre 2026,
+  la nappe est à 128,25 m, soit **0,75 m au-dessus du seuil de vigilance**, et au rythme du
+  dernier mois elle l'atteindrait vers le 17 décembre.
+
+![Projection par analogie à Beauchery-Saint-Martin, avec les mesures réelles](docs/images/projection-beauchery.webp)
+
+## Lancer l'application
+
+```powershell
+pip install -e ".[dev]"
+streamlit run app.py
+```
+
+L'application tourne aussi **sans Internet** : une copie figée des données Hub'Eau
+(`src/aquibrie_viz/instantane`, 4,3 Mo, 32 piézomètres, données au 21 novembre 2026) est
+livrée avec le paquet. Quand Hub'Eau répond, les données sont mises à jour par-dessus.
+
+```powershell
+$env:AQUIBRIE_HORS_LIGNE = "1"; streamlit run app.py   # forcer le mode sans réseau
+python -m aquibrie_viz.donnees --instantane             # régénérer l'instantané
+```
+
+### Démo en ligne (Streamlit Community Cloud)
+
+Sur [share.streamlit.io](https://share.streamlit.io) : *Create app*, dépôt `MatALass/Aqui-Brie`,
+branche `main`, fichier `app.py`, Python 3.12. Les dépendances viennent de `requirements.txt`.
+
+## Exemples d'exports
+
+| Jauges de l'Info Piézo (13 juin 2026) | Chronique et seuils réglementaires |
+| --- | --- |
+| ![Jauges de remplissage](docs/images/info-piezo-jauges.webp) | ![Chronique de Beauchery-Saint-Martin](docs/images/chronique-beauchery.webp) |
+
+| Fiche grand public A4 | Contrôle face au bulletin publié |
+| --- | --- |
+| ![Fiche grand public](docs/images/fiche-grand-public.webp) | ![Tableau de contrôle](docs/images/controle-info-piezo-65.webp) |
 
 ## Ce que montre l'application
 
 | Page | Infographies | À quoi elles servent |
 | --- | --- | --- |
+| Info Piézo | Jauges 0 à 100 · carte · projection de l'hiver · cycles sur 11 ans · contrôle face au n°65 | Refaire le bulletin d'AQUI'Brie en un clic |
 | Vue d'ensemble | Indicateurs clés · carte de situation · classement des stations | Voir d'un coup d'œil quelles zones de la nappe sont basses |
 | Station | Indicateurs clés · chronique avec seuils et projection · année vs historique · recharge annuelle · calendrier des écarts mensuels | Suivre un piézomètre, anticiper le franchissement d'un seuil |
 | Qualité de l'eau | Indicateurs clés · carte des stations · évolution annuelle · détail par station · tableau | Localiser les dépassements de norme et suivre leur évolution |
@@ -112,7 +185,7 @@ Prérequis : Python 3.11 ou plus récent, Google Chrome (nécessaire aux exports
 et une connexion Internet.
 
 ```powershell
-cd demo-aquibrie
+cd Aqui-Brie
 python -m venv .venv
 .venv\Scripts\Activate.ps1
 pip install -e ".[dev]"
@@ -166,16 +239,19 @@ app.py                      # interface Streamlit : aucun calcul, aucune figure
 static/Nunito.ttf           # police de la charte (licence OFL)
 src/aquibrie_viz/
     hubeau.py               # client de l'API Hub'Eau (remplacé plus tard par SQL Server)
-    donnees.py              # cache disque incrémental au-dessus de hubeau.py
+    donnees.py              # cache disque incrémental au-dessus de hubeau.py, repli sur l'instantané
+    instantane/             # copie figée des données Hub'Eau, pour tourner sans réseau
+    bulletin.py             # Info Piézo : jauge 0-100, tranches, projection par analogie
     indicators.py           # situation, projection, recharge, écarts, synthèses qualité
     reference.py            # masse d'eau, départements, seuils, substances suivies
     fiche.py                # fiche grand public A4
     rapport.py              # mode rapport : fichier .toml, PNG, PowerPoint, Word, ligne de commande
     theme.py                # charte graphique
-    templates.py            # les 9 modèles d'infographies
+    templates.py            # les 12 modèles d'infographies
     export.py               # PNG, SVG, PDF, HTML
 rapports/                   # rapport d'exemple (.toml) et gabarit Word d'exemple
-tests/                      # pytest : l'API est simulée, aucun réseau requis
+tests/                      # pytest : API simulée ou instantané, aucun réseau requis
+scripts/smoke_pages.py      # ouvre chaque page de l'application lancée (API agent de Streamlit)
 ```
 
 ## Tests
@@ -184,13 +260,31 @@ tests/                      # pytest : l'API est simulée, aucun réseau requis
 pytest
 ```
 
+79 tests, sans réseau. En CI (GitHub Actions, à chaque push) : `ruff check`, les tests, puis
+l'application est lancée hors ligne et chaque page est ouverte une par une
+(`scripts/smoke_pages.py`) : la CI échoue sur la moindre exception affichée.
+
 ## Limites connues
 
-- **Développé sans accès réel à Hub'Eau depuis l'environnement de développement.** Les
-  formats et filtres de l'API sont ceux de sa documentation, et le client est testé sur
-  des réponses simulées. À vérifier au premier lancement : l'onglet qualité, et en
-  particulier les champs `code_remarque_analyse` et `limite_quantification`.
+- **La liste des 26 piézomètres de l'Info Piézo est reconstituée.** Le bulletin ne donne pas
+  leurs codes. J'ai pris les 26 piézomètres actifs en 2026 qui captent le Champigny : le réseau
+  départemental (codes `/P1` à `/P19`, suivis depuis 2002-2003, sans masse d'eau renseignée
+  dans Hub'Eau, donc absents d'une recherche par masse d'eau) et ceux de la masse d'eau HG103.
+  Sur les 10 communes que le bulletin classe sous 50 %, trois ne sortent pas comme lui :
+  Cerneux est à 50,0 % pile, Courpalay ressort à 83 % sans que je sache expliquer l'écart, et
+  le piézomètre de Dammarie-les-Lys n'envoie plus de mesures à Hub'Eau depuis 2018. La liste
+  exacte est à demander à AQUI'Brie.
+- **Montereau-sur-le-Jard n'a pas de seuils réglementaires dans l'outil.** Ils sont fixés par
+  l'arrêté-cadre sécheresse de Seine-et-Marne n° 2024/DDT/SEPR/191, dont je n'ai pas trouvé
+  les valeurs en ligne : l'outil affiche des seuils indicatifs, signalés comme tels. La baisse
+  publiée (0,5 m) correspond à un départ au pic du 14 mars (51,63 m, soit 0,49 m de baisse) ;
+  depuis la date du n°64 (16 mars), elle est de 0,33 m.
+- **Le réseau départemental arrive dans Hub'Eau par lots** (dernier lot reçu : mesures
+  jusqu'au 17 septembre 2026). La page Info Piézo se place donc par défaut à la date la plus
+  récente couverte par au moins 80 % des piézomètres, et signale ceux qui n'ont pas de mesure.
+- **La projection par analogie n'est pas une prévision** : elle montre ce que la nappe a déjà
+  fait à la même saison, sans tenir compte de la météo à venir.
 - **La carte** charge son fond de plan depuis Internet (CARTO, OpenStreetMap).
-- **Seuils** : un seul piézomètre a des seuils réglementaires renseignés.
+- **Seuils** : seul Beauchery-Saint-Martin a des seuils réglementaires renseignés.
 - **Qualité** : la période commence au plus tôt en 2000, pour limiter le nombre de
   requêtes.
