@@ -15,12 +15,13 @@ from __future__ import annotations
 
 import argparse
 import re
-import warnings
 import tomllib
+import warnings
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
-from typing import Callable, Protocol
+from typing import Protocol
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -245,7 +246,7 @@ def _seuils(spec: dict, nom: str, chronique: pd.DataFrame) -> tuple[dict[str, fl
     if officiels:
         return officiels, True
     if spec.get("seuils") and len(spec["seuils"]) == 4:
-        return dict(zip(reference.QUANTILES_INDICATIFS, map(float, spec["seuils"]))), False
+        return dict(zip(reference.QUANTILES_INDICATIFS, map(float, spec["seuils"]), strict=False)), False
     return reference.seuils_indicatifs(chronique), False
 
 

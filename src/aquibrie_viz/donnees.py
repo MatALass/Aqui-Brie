@@ -16,6 +16,12 @@ Si Hub'Eau ne répond pas et qu'une version en cache existe, elle est utilisée
 
 Emplacement du cache : variable d'environnement AQUIBRIE_CACHE, sinon
 ~/.cache/aquibrie. Le supprimer force un retéléchargement complet.
+
+Instantané : une copie figée des données Hub'Eau est livrée avec le paquet
+(aquibrie_viz/instantane, ~5 Mo). Une donnée absente du cache est d'abord lue dans
+l'instantané, puis mise à jour si Hub'Eau répond. Sans réseau (ou avec
+AQUIBRIE_HORS_LIGNE=1), l'application tourne donc quand même, sur des données datées.
+Régénérer l'instantané : python -m aquibrie_viz.donnees --instantane
 """
 from __future__ import annotations
 
@@ -41,8 +47,27 @@ FRAICHEUR_ANALYSES_ANCIENNES = timedelta(days=30)
 RECOUVREMENT = timedelta(days=21)
 
 
+INSTANTANE = Path(__file__).parent / "instantane"
+
+
 def dossier_cache() -> Path:
     return Path(os.environ.get("AQUIBRIE_CACHE", Path.home() / ".cache" / "aquibrie"))
+
+
+def dossier_instantane() -> Path:
+    return Path(os.environ.get("AQUIBRIE_INSTANTANE", INSTANTANE))
+
+
+def hors_ligne() -> bool:
+    """AQUIBRIE_HORS_LIGNE=1 : ne jamais appeler Hub'Eau (tests, démo sans réseau)."""
+    return os.environ.get("AQUIBRIE_HORS_LIGNE", "").strip().lower() in ("1", "true", "oui", "yes")
+
+
+def _api(fonction, *args, **kwargs):
+    """Appel à Hub'Eau, court-circuité en mode hors ligne."""
+    if hors_ligne():
+        raise hubeau.HubEauError("mode hors ligne (AQUIBRIE_HORS_LIGNE)")
+    return fonction(*args, **kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -59,10 +84,10 @@ def _verrou(cle: str) -> threading.Lock:
         return _verrous.setdefault(cle, threading.Lock())
 
 
-def _chemins(categorie: str, cle: str) -> tuple[Path, Path]:
+def _chemins(categorie: str, cle: str, base: Path | None = None) -> tuple[Path, Path]:
     nom = hashlib.sha1(cle.encode()).hexdigest()[:16]
-    base = dossier_cache() / categorie
-    return base / f"{nom}.parquet", base / f"{nom}.json"
+    dossier = (base or dossier_cache()) / categorie
+    return dossier / f"{nom}.parquet", dossier / f"{nom}.json"
 
 
 def _uniformiser(df: pd.DataFrame) -> pd.DataFrame:
@@ -76,13 +101,16 @@ def _uniformiser(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _lire(categorie: str, cle: str) -> tuple[pd.DataFrame | None, dict]:
-    donnees, meta = _chemins(categorie, cle)
-    if not (donnees.exists() and meta.exists()):
-        return None, {}
-    try:
-        return _uniformiser(pd.read_parquet(donnees)), json.loads(meta.read_text(encoding="utf-8"))
-    except Exception:  # noqa: BLE001 — fichier corrompu : on le considère absent
-        return None, {}
+    """Cache, sinon instantané livré avec le paquet, sinon (None, {})."""
+    for base in (dossier_cache(), dossier_instantane()):
+        donnees, meta = _chemins(categorie, cle, base)
+        if not (donnees.exists() and meta.exists()):
+            continue
+        try:
+            return _uniformiser(pd.read_parquet(donnees)), json.loads(meta.read_text(encoding="utf-8"))
+        except Exception:  # noqa: BLE001, S112 - fichier corrompu : on le considère absent
+            continue
+    return None, {}
 
 
 def _ecrire(categorie: str, cle: str, df: pd.DataFrame, meta: dict) -> None:
@@ -119,7 +147,7 @@ def stations(departements: list[str] | None = None, masse_eau: str | None = None
         if cache is not None and _age(meta) < FRAICHEUR_STATIONS:
             return cache
         try:
-            df = hubeau.stations_piezo(departements, masse_eau)
+            df = _api(hubeau.stations_piezo, departements, masse_eau)
         except hubeau.HubEauError:
             if cache is not None:
                 return cache
@@ -142,16 +170,16 @@ def chronique(code_bss: str, debut: date, fin: date | None = None) -> pd.DataFra
         nouveau_meta = dict(meta)
         try:
             if cache is None:
-                morceaux.append(hubeau.chronique_piezo(code_bss, debut, aujourd_hui))
+                morceaux.append(_api(hubeau.chronique_piezo, code_bss, debut, aujourd_hui))
                 nouveau_meta = {"debut": debut.isoformat(), "maj": _maintenant().isoformat()}
             else:
                 debut_couvert = date.fromisoformat(meta["debut"])
                 if debut < debut_couvert:  # historique plus ancien demandé
-                    morceaux.append(hubeau.chronique_piezo(code_bss, debut, debut_couvert - timedelta(days=1)))
+                    morceaux.append(_api(hubeau.chronique_piezo, code_bss, debut, debut_couvert - timedelta(days=1)))
                     nouveau_meta["debut"] = debut.isoformat()
                 if _age(meta) > FRAICHEUR_CHRONIQUE:  # seulement les dernières semaines
                     depuis = (cache["date"].max().date() - RECOUVREMENT) if not cache.empty else debut
-                    morceaux.append(hubeau.chronique_piezo(code_bss, max(depuis, debut), aujourd_hui))
+                    morceaux.append(_api(hubeau.chronique_piezo, code_bss, max(depuis, debut), aujourd_hui))
                     nouveau_meta["maj"] = _maintenant().isoformat()
         except hubeau.HubEauError:
             if cache is None:
@@ -177,7 +205,7 @@ def chroniques(codes: list[str], debut: date, fin: date | None = None,
             return None
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        resultats = dict(zip(codes, pool.map(charger, codes)))
+        resultats = dict(zip(codes, pool.map(charger, codes), strict=False))
     return ({c: df for c, df in resultats.items() if df is not None},
             [c for c, df in resultats.items() if df is None])
 
@@ -195,7 +223,7 @@ def _analyses_annee(code_param: str, annee: int, masse_eau: str | None, departem
         if cache is not None and _age(meta) < fraicheur:
             return cache
         try:
-            df = hubeau.analyses_annee(code_param, annee, masse_eau, departements)
+            df = _api(hubeau.analyses_annee, code_param, annee, masse_eau, departements)
         except hubeau.HubEauError:
             if cache is not None:
                 return cache
@@ -265,16 +293,53 @@ def prechauffer(annees_qualite: int = 10) -> str:
 
     debut = datetime.now()
     sta = stations(reference.DEPARTEMENTS_CHAMPIGNY, reference.CODE_MASSE_EAU_CHAMPIGNY)
+    stations(reference.DEPARTEMENTS_CHAMPIGNY, None)  # repli par département et réseau Info Piézo
     actives = sta[sta["date_fin_mesure"] >= pd.Timestamp.today() - pd.DateOffset(years=1)]
-    _, echecs = chroniques(list(actives["code_bss"]), date(1970, 1, 1))
+    codes = sorted(set(actives["code_bss"]) | set(reference.RESEAU_INFO_PIEZO))
+    _, echecs = chroniques(codes, date(1970, 1, 1))
     aujourd_hui = date.today()
     for substance in reference.SUBSTANCES.values():
         analyses(substance["code"], date(aujourd_hui.year - annees_qualite, 1, 1), aujourd_hui,
                  reference.CODE_MASSE_EAU_CHAMPIGNY, reference.DEPARTEMENTS_CHAMPIGNY)
     e = etat()
-    return (f"{len(actives)} stations, {len(echecs)} échec(s), {e.fichiers} fichiers ({e.taille_mo:.1f} Mo) "
+    return (f"{len(codes)} stations, {len(echecs)} échec(s), {e.fichiers} fichiers ({e.taille_mo:.1f} Mo) "
             f"en {(datetime.now() - debut).total_seconds():.0f} s → {e.dossier}")
 
 
+def construire_instantane(dossier: Path = INSTANTANE) -> str:
+    """Écrit l'instantané livré avec le paquet : un cache complet, construit de zéro."""
+    import shutil
+
+    if dossier.exists():
+        shutil.rmtree(dossier)
+    ancien = os.environ.get("AQUIBRIE_CACHE")
+    os.environ["AQUIBRIE_CACHE"] = str(dossier)
+    try:
+        resume = prechauffer()
+    finally:
+        if ancien is None:
+            os.environ.pop("AQUIBRIE_CACHE")
+        else:
+            os.environ["AQUIBRIE_CACHE"] = ancien
+    (dossier / "LISEZMOI.txt").write_text(
+        f"Instantané des données Hub'Eau du {date.today().isoformat()}.\n"
+        "Régénéré par : python -m aquibrie_viz.donnees --instantane\n",
+        encoding="utf-8",
+    )
+    return resume
+
+
+def date_instantane() -> date | None:
+    lisezmoi = dossier_instantane() / "LISEZMOI.txt"
+    if not lisezmoi.exists():
+        return None
+    try:
+        return date.fromisoformat(lisezmoi.read_text(encoding="utf-8").split("du ")[1][:10])
+    except (IndexError, ValueError):
+        return None
+
+
 if __name__ == "__main__":
-    print(prechauffer())
+    import sys
+
+    print(construire_instantane() if "--instantane" in sys.argv else prechauffer())

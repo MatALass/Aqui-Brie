@@ -1,0 +1,2 @@
+Instantané des données Hub'Eau du 2026-11-21.
+Régénéré par : python -m aquibrie_viz.donnees --instantane

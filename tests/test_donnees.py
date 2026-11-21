@@ -10,6 +10,9 @@ from aquibrie_viz import donnees, hubeau
 @pytest.fixture(autouse=True)
 def cache_temporaire(tmp_path, monkeypatch):
     monkeypatch.setenv("AQUIBRIE_CACHE", str(tmp_path / "cache"))
+    # Ces tests comptent les appels à Hub'Eau : ni instantané, ni mode hors ligne.
+    monkeypatch.setenv("AQUIBRIE_INSTANTANE", str(tmp_path / "instantane"))
+    monkeypatch.delenv("AQUIBRIE_HORS_LIGNE", raising=False)
 
 
 class FauxClient:
@@ -124,3 +127,21 @@ def test_etat_et_peremption(monkeypatch):
     donnees.marquer_perime()
     donnees.chronique("X", date(2010, 1, 1))
     assert len(client.appels) == 2
+
+
+def test_instantane_utilise_quand_hub_eau_est_en_panne(tmp_path, monkeypatch):
+    client = FauxClient(monkeypatch)
+    monkeypatch.setenv("AQUIBRIE_CACHE", str(tmp_path / "instantane"))
+    donnees.chronique("A", date(2020, 1, 1))  # construit l'« instantané »
+    monkeypatch.setenv("AQUIBRIE_CACHE", str(tmp_path / "cache_vide"))
+    client.panne = True
+    df = donnees.chronique("A", date(2020, 1, 1))
+    assert not df.empty and df["date"].max() == pd.Timestamp("2026-11-05")
+
+
+def test_mode_hors_ligne_n_appelle_jamais_hub_eau(monkeypatch):
+    client = FauxClient(monkeypatch)
+    monkeypatch.setenv("AQUIBRIE_HORS_LIGNE", "1")
+    with pytest.raises(hubeau.HubEauError, match="hors ligne"):
+        donnees.chronique("A", date(2020, 1, 1))
+    assert client.appels == []

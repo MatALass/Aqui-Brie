@@ -54,6 +54,14 @@ SITUATION = {
     "Très haut": "#00737A",
 }
 
+# Taux de remplissage de l'Info Piézo : mêmes terres -> bleu-vert que la situation.
+REMPLISSAGE = {
+    "Très faible": "#9C3D22",
+    "Faible": "#D9A05B",
+    "Satisfaisant": "#6FBFC2",
+    "Très satisfaisant": "#00737A",
+}
+
 # Qualité de l'eau : du neutre (jamais quantifié) à la brique (dépassement).
 QUALITE = {
     "Jamais quantifié": "#B9C4C1",
